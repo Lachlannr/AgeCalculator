@@ -12,8 +12,8 @@ The tool provides a user's age in years, months, and days, and includes features
 -   **Vast Date Format Support**: Parses dozens of formats, including standard (`YYYY-MM-DD`), natural language (`December 25, 1990`), timestamps, ISO 8601 week dates, and more.
 -   **Accurate Age Calculation**: Precisely calculates age in years, months, and days, correctly handling leap years and month-end boundary conditions.
 -   **Rich Output**: Tells you the day of the week you were born on and provides a countdown to your next birthday.
+-   **Dual-Mode CLI**: Supports both an interactive prompt and direct execution via command-line arguments.
 -   **Zero Dependencies**: Built entirely with the Python standard library, making it highly portable and easy to run anywhere.
--   **Interactive CLI**: A simple and user-friendly command-line interface for entering dates.
 -   **Comprehensive Test Suite**: Includes a robust set of unit tests to ensure accuracy and reliability.
 
 ## Interesting Techniques
@@ -27,8 +27,9 @@ The codebase uses several notable techniques to achieve its robustness and flexi
 
 ## Technology and Libraries
 
-This project is intentionally built with **zero external dependencies**, relying solely on the Python 3 standard library for maximum portability.
+This project is intentionally built with **zero external dependencies**, relying solely on the Python 3 standard library.
 
+-   [`argparse`](https://docs.python.org/3/library/argparse.html): Used to handle command-line arguments for direct execution mode.
 -   [`re`](https://docs.python.org/3/library/re.html): Used extensively for pre-processing and validating user input against various date patterns.
 -   [`datetime`](https://docs.python.org/3/library/datetime.html): The foundation for all date and time logic, including parsing with `strptime` and timedelta calculations.
 -   [`unittest`](https://docs.python.org/3/library/unittest.html): The built-in framework used to create the comprehensive test suite in [`Test.py`](./Test.py), ensuring the accuracy of parsing and calculation logic.
