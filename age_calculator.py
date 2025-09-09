@@ -4,9 +4,10 @@
 Age Calculator - A comprehensive tool for calculating ages from various date formats.
 
 Author: Age Calculator Project
-Version: 5.0.0
+Version: 5.0.1
 """
 
+import argparse
 import datetime
 import re
 from typing import Optional, List
@@ -266,14 +267,11 @@ class AgeCalculatorApp:
                 
                 age_data = self.age_calculator.calculate_age(birthday)
                 print(self.age_calculator.format_age_output(birthday, age_data))
-
             except ValueError as e:
                 print(f"❌ Error: {e}\n")
-            except KeyboardInterrupt:
+            except (KeyboardInterrupt, EOFError):
                 print("\n\nGoodbye! 👋")
                 break
-            except Exception as e:
-                print(f"❌ An unexpected error occurred: {e}\n")
 
     def _display_welcome(self) -> None:
         """Prints a visually appealing and informative welcome message."""
@@ -300,11 +298,38 @@ Type 'quit' or 'exit' to close the program.
         return input("Enter your birthday: ").strip()
 
 def main() -> None:
-    """Entry point for the age calculator application."""
-    parser = DateParser()
-    calculator = AgeCalculator()
-    app = AgeCalculatorApp(parser, calculator)
-    app.run()
+    """
+    Entry point for the age calculator application.
+    Supports both direct (command-line argument) and interactive modes.
+    """
+    parser = argparse.ArgumentParser(
+        description="A robust CLI tool to calculate age from a birthday.",
+        epilog="If no birthday is provided, the application will start in interactive mode."
+    )
+    parser.add_argument("birthday", nargs="?", default=None, help="The birthday string to parse (e.g., 'Dec 25 1990').")
+    args = parser.parse_args()
+
+    date_parser = DateParser()
+    age_calculator = AgeCalculator()
+
+    if args.birthday:
+        try:
+            birthday_date = date_parser.parse_date(args.birthday)
+            if not birthday_date:
+                print(f"❌ Error: The date format was not recognized: '{args.birthday}'")
+                return
+            
+            age_data = age_calculator.calculate_age(birthday_date)
+            print(age_calculator.format_age_output(birthday_date, age_data))
+        except ValueError as e:
+            print(f"❌ Error: {e}\n")
+        except (KeyboardInterrupt, EOFError):
+            print("\n\nGoodbye! 👋")
+
+    else:
+        app = AgeCalculatorApp(date_parser, age_calculator)
+        app.run()
+
 
 if __name__ == "__main__":
     main()
