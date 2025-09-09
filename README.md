@@ -36,7 +36,7 @@ This project is intentionally built with **zero external dependencies**, relying
 ## Project Structure
 
 ```
-age-calculator/
+AgeCalculator/
 ├── .gitignore
 ├── age_calculator.py
 ├── LICENSE
