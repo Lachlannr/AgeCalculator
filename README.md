@@ -1,25 +1,37 @@
-# Age Calculator
+# Age Calculator CLI
 
-This project provides a command-line tool for calculating age from a birthdate. It is written in Python and designed to be a flexible and robust date-parsing and age-calculation engine. The tool handles a wide variety of date formats, including natural language.
+![Python Version](https://img.shields.io/badge/python-3.9%2B-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
 
-The core logic is encapsulated in two main classes: `DateParser` for interpreting input strings and `AgeCalculator` for performing the age calculation. The project includes a comprehensive test suite built with Python's `unittest` framework.
+A robust, dependency-free command-line tool for calculating age from a wide variety of date formats. This script features a powerful date parser, precise age calculation logic, and an interactive CLI, all built using only the Python standard library.
+
+The tool provides a user's age in years, months, and days, and includes features like identifying the birth day of the week and a countdown to the next birthday.
+
+## Key Features
+
+-   **Vast Date Format Support**: Parses dozens of formats, including standard (`YYYY-MM-DD`), natural language (`December 25, 1990`), timestamps, ISO 8601 week dates, and more.
+-   **Accurate Age Calculation**: Precisely calculates age in years, months, and days, correctly handling leap years and month-end boundary conditions.
+-   **Rich Output**: Tells you the day of the week you were born on and provides a countdown to your next birthday.
+-   **Zero Dependencies**: Built entirely with the Python standard library, making it highly portable and easy to run anywhere.
+-   **Interactive CLI**: A simple and user-friendly command-line interface for entering dates.
+-   **Comprehensive Test Suite**: Includes a robust set of unit tests to ensure accuracy and reliability.
 
 ## Interesting Techniques
 
-The codebase uses several notable techniques:
+The codebase uses several notable techniques to achieve its robustness and flexibility:
 
-- **Flexible Date Parsing**: The `DateParser` class in [`age_calculator.py`](./age_calculator.py) uses a series of parsing strategies to handle multiple date formats without external dependencies. It attempts to parse formats in a specific order, from most common to least common, to resolve ambiguity.
-- **Pre-compiled Regular Expressions**: To improve performance when handling dates with ordinal suffixes (e.g., "1st", "2nd"), the script pre-compiles the regular expression using [`re.compile()`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/RegExp/compile).
-- **Robust Age Calculation**: The `calculate_age` method in [`age_calculator.py`](./age_calculator.py) correctly accounts for leap years and the varying number of days in each month.
-- **Mocking for Tests**: The test file, [`Test.py`](./Test.py), uses [`unittest.mock.patch`](https://docs.python.org/3/library/unittest.mock.html#unittest.mock.patch) to control the "current" date for tests, ensuring that tests are repeatable and not dependent on when they are run.
+-   **Cascading Parse Strategy**: The `DateParser` in [`age_calculator.py`](./age_calculator.py) uses a cascading strategy for efficiency. It attempts to match input against cheap, highly specific parsers (e.g., relative dates like "today", Julian dates) before iterating through a broad list of standard formats.
+-   **Locale-Independent Parsing**: To handle natural language dates with weekday names (e.g., "Tuesday, Sep 9, 2025"), the parser uses a regular expression to strip the weekday before parsing. This avoids reliance on system-level [`locale`](https://docs.python.org/3/library/locale.html) settings, making the tool's behavior consistent across different environments.
+-   **Structured Data with Dataclasses**: The `calculate_age` function returns an `AgeResult` object, which is a [`dataclass`](https://docs.python.org/3/library/dataclasses.html). This provides a clear, type-safe structure for the output instead of relying on dictionaries.
+-   **Precise Boundary Condition Handling**: The core age calculation logic correctly handles complex edge cases, such as leap-day birthdays in common years and birthdays occurring late in a month.
 
-## Technologies and Libraries
+## Technology and Libraries
 
-This project intentionally limits its external dependencies, relying on Python's standard library.
+This project is intentionally built with **zero external dependencies**, relying solely on the Python 3 standard library for maximum portability.
 
-- **[datetime](https://docs.python.org/3/library/datetime.html)**: Used for all date and time manipulation.
-- **[re](https://docs.python.org/3/library/re.html)**: Used for parsing date strings with ordinal numbers.
-- **[unittest](https://docs.python.org/3/library/unittest.html)**: The standard Python framework for unit testing, used extensively in [`Test.py`](./Test.py).
+-   [`re`](https://docs.python.org/3/library/re.html): Used extensively for pre-processing and validating user input against various date patterns.
+-   [`datetime`](https://docs.python.org/3/library/datetime.html): The foundation for all date and time logic, including parsing with `strptime` and timedelta calculations.
+-   [`unittest`](https://docs.python.org/3/library/unittest.html): The built-in framework used to create the comprehensive test suite in [`Test.py`](./Test.py), ensuring the accuracy of parsing and calculation logic.
 
 ## Project Structure
 
@@ -32,5 +44,9 @@ age-calculator/
 └── Test.py
 ```
 
-- **`age_calculator.py`**: The main application file, containing the logic for parsing dates and calculating age.
-- **`Test.py`**: Contains all unit tests for the project.
+-   **`age_calculator.py`**: The main application file, containing the logic for parsing dates and calculating age.
+-   **`Test.py`**: Contains all unit tests for the project.
+
+## License
+
+This project is licensed under the MIT License.
