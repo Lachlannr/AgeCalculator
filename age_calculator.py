@@ -35,40 +35,6 @@ class AgeResult:
     next_birthday_in_days: int
 
 
-class MessageFormatter:
-    """Helper class for formatting messages with optional emoji support."""
-
-    def __init__(self, use_emoji: bool = True):
-        self.use_emoji = use_emoji
-
-    def goodbye(self) -> str:
-        """Returns goodbye message."""
-        return "Goodbye! 👋" if self.use_emoji else "Goodbye!"
-
-    def warning(self, message: str) -> str:
-        """Returns warning message with appropriate prefix."""
-        prefix = "⚠️ " if self.use_emoji else "Warning: "
-        return f"{prefix}{message}"
-
-    def error(self, message: str) -> str:
-        """Returns error message with appropriate prefix."""
-        prefix = "❌ " if self.use_emoji else "Error: "
-        return f"{prefix}{message}"
-
-    def results_header(self) -> str:
-        """Returns results header."""
-        return "✨ Results:" if self.use_emoji else "Results:"
-
-    def birthday_message(self, days_until: int) -> str:
-        """Returns birthday countdown or celebration message."""
-        if days_until == 0:
-            return "Happy Birthday! 🎉" if self.use_emoji else "Happy Birthday!"
-        cake = " 🎂" if self.use_emoji else ""
-        return f"Your next birthday is in {days_until} days!{cake}"
-
-    def title(self) -> str:
-        """Returns application title."""
-        return "🎂 Age Calculator 🎂" if self.use_emoji else "Age Calculator"
 
 class DateParser:
     """Handles parsing of various date formats without external dependencies."""
@@ -308,12 +274,9 @@ class AgeCalculator:
     @staticmethod
     def format_age_output(
         birthday: datetime.date,
-        age_data: AgeResult,
-        use_emoji: bool = True
+        age_data: AgeResult
     ) -> str:
         """Format age calculation results as a human-readable string."""
-        formatter = MessageFormatter(use_emoji)
-
         age_parts = []
         if age_data.years > 0:
             plural = "s" if age_data.years != 1 else ""
@@ -330,12 +293,14 @@ class AgeCalculator:
         else:
             age_str = age_parts[0] if age_parts else "0 days"
 
+        birthday_msg = "Happy Birthday!" if age_data.next_birthday_in_days == 0 else f"Your next birthday is in {age_data.next_birthday_in_days} days!"
+
         return (
-            f"\n{formatter.results_header()}\n--------------------\n"
+            f"\nResults:\n--------------------\n"
             f"Born on a {age_data.birth_day_of_week}: {birthday.strftime('%B %d, %Y')}\n"
             f"You are {age_str} old.\n"
             f"That's a total of {age_data.total_days:,} days!\n\n"
-            f"{formatter.birthday_message(age_data.next_birthday_in_days)}\n"
+            f"{birthday_msg}\n"
         )
 
 class AgeCalculatorApp:
@@ -345,13 +310,10 @@ class AgeCalculatorApp:
     def __init__(
         self,
         date_parser: DateParser,
-        age_calculator: AgeCalculator,
-        use_emoji: bool = True
+        age_calculator: AgeCalculator
     ):
         self.date_parser = date_parser
         self.age_calculator = age_calculator
-        self.formatter = MessageFormatter(use_emoji)
-        self.use_emoji = use_emoji
 
     def run(self) -> None:
         """Starts the main application loop."""
@@ -361,32 +323,32 @@ class AgeCalculatorApp:
             try:
                 user_input = self._get_user_input()
                 if user_input.lower() in self.EXIT_COMMANDS:
-                    print(self.formatter.goodbye())
+                    print("Goodbye!")
                     break
 
                 if not user_input:
-                    print(self.formatter.warning("Please enter a birthday."))
+                    print("Warning: Please enter a birthday.")
                     continue
 
                 birthday = self.date_parser.parse_date(user_input)
                 if not birthday:
                     message = "Sorry, that date format was not recognized. Please try again."
-                    print(self.formatter.error(message))
+                    print(f"Error: {message}")
                     continue
 
                 age_data = self.age_calculator.calculate_age(birthday)
-                output = self.age_calculator.format_age_output(birthday, age_data, self.use_emoji)
+                output = self.age_calculator.format_age_output(birthday, age_data)
                 print(output)
             except ValueError as e:
-                print(self.formatter.error(str(e)))
+                print(f"Error: {str(e)}")
             except (KeyboardInterrupt, EOFError):
-                print(f"\n\n{self.formatter.goodbye()}")
+                print(f"\n\nGoodbye!")
                 break
 
     def _display_welcome(self) -> None:
         """Prints a visually appealing and informative welcome message."""
         welcome_text = """
-{title}
+Age Calculator
 ==============================
 Find out your age down to the day, discover the
 day of the week you were born, and see how long
@@ -404,7 +366,7 @@ Supports 70+ date formats! Try any of these:
 Type 'quit' or 'exit' to close the program.
 ==============================
 """
-        print(welcome_text.format(title=self.formatter.title()))
+        print(welcome_text)
 
     def _get_user_input(self) -> str:
         """Prompts the user for their birthday."""
@@ -425,35 +387,28 @@ def main() -> None:
         default=None,
         help="The birthday string to parse (e.g., 'Dec 25 1990')."
     )
-    parser.add_argument(
-        "--no-emoji",
-        action="store_true",
-        help="Disable emoji output for better terminal compatibility."
-    )
     args = parser.parse_args()
 
     date_parser = DateParser()
     age_calculator = AgeCalculator()
-    use_emoji = not args.no_emoji
-    formatter = MessageFormatter(use_emoji)
 
     if args.birthday:
         try:
             birthday_date = date_parser.parse_date(args.birthday)
             if not birthday_date:
                 error_msg = f"The date format was not recognized: '{args.birthday}'"
-                print(formatter.error(error_msg))
+                print(f"Error: {error_msg}")
                 return
 
             age_data = age_calculator.calculate_age(birthday_date)
-            output = age_calculator.format_age_output(birthday_date, age_data, use_emoji)
+            output = age_calculator.format_age_output(birthday_date, age_data)
             print(output)
         except ValueError as e:
-            print(formatter.error(str(e)))
+            print(f"Error: {str(e)}")
         except (KeyboardInterrupt, EOFError):
-            print(f"\n\n{formatter.goodbye()}")
+            print(f"\n\nGoodbye!")
     else:
-        app = AgeCalculatorApp(date_parser, age_calculator, use_emoji)
+        app = AgeCalculatorApp(date_parser, age_calculator)
         app.run()
 
 
