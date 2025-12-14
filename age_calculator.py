@@ -13,29 +13,32 @@ import datetime
 import re
 from calendar import isleap
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import Callable, Dict, List, Optional, Tuple
 
-DAY_NAME_REGEX = re.compile(
-    r"^(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|Mon|Tue|Wed|Thu|Fri|Sat|Sun),?\s*",
-    re.IGNORECASE,
-)
-ORDINAL_SUFFIX_REGEX = re.compile(r"(\d{1,2})(st|nd|rd|th)", re.IGNORECASE)
-DAY_OF_MONTH_REGEX = re.compile(
-    r"(\d{1,2})(?:st|nd|rd|th)?\s+of\s+([a-zA-Z]+)\s+(\d{4})",
-    re.IGNORECASE,
-)
-COMPACT_DATE_REGEX = re.compile(r"^\d{6,8}$")
-JULIAN_DATE_REGEX = re.compile(r"^(\d{4})-(\d{1,3})$")
-UNIX_TIMESTAMP_REGEX = re.compile(r"^(0|\d{9,10})$")
-EXCEL_SERIAL_REGEX = re.compile(r"^\d{1,7}$")
-FISCAL_QUARTER_REGEX = re.compile(r"^(\d{4})[-\s]?Q([1-4])$", re.IGNORECASE)
 
 MAX_INPUT_LENGTH = 1000
 MIN_VALID_YEAR = 1900
 MAX_VALID_YEAR = 2100
+MAX_UNIX_TIMESTAMP = 4102444800
+MAX_EXCEL_SERIAL = 2958465
+
+COMPACT_DATE_REGEX = re.compile(r"^\d{6,8}$")
+DAY_NAME_REGEX = re.compile(
+    r"^(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|Mon|Tue|Wed|Thu|Fri|Sat|Sun),?\s*",
+    re.IGNORECASE,
+)
+DAY_OF_MONTH_REGEX = re.compile(
+    r"(\d{1,2})(?:st|nd|rd|th)?\s+of\s+([a-z]+)\s+(\d{4})",
+    re.IGNORECASE,
+)
+EXCEL_SERIAL_REGEX = re.compile(r"^\d{1,5}$|^\d{7}$")
+FISCAL_QUARTER_REGEX = re.compile(r"^(\d{4})[-\s]?Q([1-4])$", re.IGNORECASE)
+JULIAN_DATE_REGEX = re.compile(r"^(\d{4})-(\d{1,3})$")
+ORDINAL_SUFFIX_REGEX = re.compile(r"(\d{1,2})(?:st|nd|rd|th)", re.IGNORECASE)
+UNIX_TIMESTAMP_REGEX = re.compile(r"^0$|^[1-9]\d{8,9}$")
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class AgeResult:
     """Container for age calculation results including years, months, days, and additional metadata."""
 
@@ -50,7 +53,7 @@ class AgeResult:
 class DateParser:
     """Parses dates from various formats including ISO, natural language, and specialized formats."""
 
-    DATE_FORMATS: List[str] = [
+    DATE_FORMATS: Tuple[str, ...] = (
         # ISO 8601 Standard Formats (YYYY-MM-DD)
         "%Y-%m-%d",
         "%Y/%m/%d",
@@ -158,9 +161,9 @@ class DateParser:
         "%Y/%m/%d %H:%M",
         # Year Only
         "%Y",
-    ]
+    )
 
-    NATURAL_FORMATS: List[str] = [
+    NATURAL_FORMATS: Tuple[str, ...] = (
         "%B %d, %Y",
         "%b %d, %Y",
         "%d %B, %Y",
@@ -169,10 +172,32 @@ class DateParser:
         "%b %d %Y",
         "%d %B %Y",
         "%d %b %Y",
-    ]
+    )
 
-    @staticmethod
-    def parse_date(date_str: str) -> Optional[datetime.date]:
+    _FORMATS_WITH_DAY: frozenset = frozenset(
+        fmt
+        for fmt in DATE_FORMATS
+        if any(marker in fmt.lower() for marker in ("%d", "%j", "%u"))
+    )
+
+    _RELATIVE_DATE_OFFSETS: Dict[str, int] = {
+        "now": 0,
+        "today": 0,
+        "tomorrow": 1,
+        "yesterday": -1,
+    }
+
+    _RELATIVE_DATE_TIMEDELTAS: Dict[str, datetime.timedelta] = {
+        "last month": datetime.timedelta(days=-30),
+        "last week": datetime.timedelta(weeks=-1),
+        "last year": datetime.timedelta(days=-365),
+        "next month": datetime.timedelta(days=30),
+        "next week": datetime.timedelta(weeks=1),
+        "next year": datetime.timedelta(days=365),
+    }
+
+    @classmethod
+    def parse_date(cls, date_str: str) -> Optional[datetime.date]:
         """
         Parse a date string using multiple parsing strategies.
 
@@ -182,7 +207,6 @@ class DateParser:
         Returns:
             A datetime.date object if parsing succeeds, None otherwise
         """
-
         if not isinstance(date_str, str):
             return None
 
@@ -191,199 +215,138 @@ class DateParser:
         if not clean_str or len(clean_str) > MAX_INPUT_LENGTH:
             return None
 
-        if unix_date := DateParser._parse_unix_timestamp(clean_str):
-            return DateParser._validate_date_bounds(unix_date)
+        if unix_date := cls._parse_unix_timestamp(clean_str):
+            return cls._validate_date_bounds(unix_date)
 
         clean_str = DAY_NAME_REGEX.sub("", clean_str)
         clean_str = clean_str.replace("T", " ")
 
-        if relative_date := DateParser._get_relative_date(clean_str.lower()):
-            return DateParser._validate_date_bounds(relative_date)
+        if parsed := cls._try_specialized_parsers(clean_str):
+            return cls._validate_date_bounds(parsed)
 
-        if julian_date := DateParser._parse_julian(clean_str):
-            return DateParser._validate_date_bounds(julian_date)
+        return cls._try_standard_formats(clean_str)
 
-        if excel_date := DateParser._parse_excel_serial(clean_str):
-            return DateParser._validate_date_bounds(excel_date)
+    @classmethod
+    def _try_specialized_parsers(cls, clean_str: str) -> Optional[datetime.date]:
+        """Try all specialized date parsers in sequence."""
+        lower_str = clean_str.lower()
 
-        if fiscal_date := DateParser._parse_fiscal_quarter(clean_str):
-            return DateParser._validate_date_bounds(fiscal_date)
+        if lower_str in cls._RELATIVE_DATE_OFFSETS:
+            return datetime.date.today() + datetime.timedelta(
+                days=cls._RELATIVE_DATE_OFFSETS[lower_str]
+            )
 
-        if special_format_date := DateParser._parse_special_formats(clean_str):
-            return DateParser._validate_date_bounds(special_format_date)
+        if lower_str in cls._RELATIVE_DATE_TIMEDELTAS:
+            return datetime.date.today() + cls._RELATIVE_DATE_TIMEDELTAS[lower_str]
+
+        parsers: Tuple[Callable[[str], Optional[datetime.date]], ...] = (
+            cls._parse_julian,
+            cls._parse_excel_serial,
+            cls._parse_fiscal_quarter,
+            cls._parse_special_formats,
+        )
+
+        for parser in parsers:
+            if result := parser(clean_str):
+                return result
 
         if COMPACT_DATE_REGEX.match(clean_str):
-            if numeric_date := DateParser._parse_compact_numeric(clean_str):
-                return DateParser._validate_date_bounds(numeric_date)
+            return cls._parse_compact_numeric(clean_str)
 
+        return None
+
+    @classmethod
+    def _try_standard_formats(cls, clean_str: str) -> Optional[datetime.date]:
+        """Try parsing with standard date format strings."""
         normalized_case = clean_str.title()
-        for fmt in DateParser.DATE_FORMATS:
-            if parsed_date := DateParser._try_strptime(normalized_case, fmt):
-                has_day = any(marker in fmt.lower() for marker in ["%d", "%j", "%u"])
-                if not has_day:
-                    result = parsed_date.replace(day=1).date()
-                else:
+
+        for fmt in cls.DATE_FORMATS:
+            try:
+                parsed_date = datetime.datetime.strptime(normalized_case, fmt)
+                if fmt in cls._FORMATS_WITH_DAY:
                     result = parsed_date.date()
-                return DateParser._validate_date_bounds(result)
+                else:
+                    result = parsed_date.replace(day=1).date()
+                return cls._validate_date_bounds(result)
+            except ValueError:
+                continue
+
+        return None
+
+    @classmethod
+    def _parse_special_formats(cls, date_str: str) -> Optional[datetime.date]:
+        """Parse 'day of month' and ordinal formats (e.g., '25th of December 1990')."""
+        # Try "day of month" format
+        if match := DAY_OF_MONTH_REGEX.match(date_str):
+            day, month, year = match.groups()
+            clean_str = f"{day} {month} {year}"
+            for fmt in cls.NATURAL_FORMATS:
+                try:
+                    return datetime.datetime.strptime(clean_str, fmt).date()
+                except ValueError:
+                    continue
+
+        # Try ordinal suffix format
+        if ORDINAL_SUFFIX_REGEX.search(date_str):
+            clean_str = ORDINAL_SUFFIX_REGEX.sub(r"\1", date_str)
+            for fmt in cls.NATURAL_FORMATS:
+                try:
+                    return datetime.datetime.strptime(clean_str, fmt).date()
+                except ValueError:
+                    continue
 
         return None
 
     @staticmethod
     def _validate_date_bounds(date: Optional[datetime.date]) -> Optional[datetime.date]:
-        """
-        Validate that a parsed date is within reasonable year bounds.
-
-        Args:
-            date: The date to validate
-
-        Returns:
-            The date if valid, None if out of bounds
-        """
+        """Validate that a parsed date is within reasonable year bounds."""
         if date is None:
             return None
 
-        if not (MIN_VALID_YEAR <= date.year <= MAX_VALID_YEAR):
-            return None
-
-        return date
-
-    @staticmethod
-    def _get_relative_date(date_str: str) -> Optional[datetime.date]:
-        """
-        Parse relative date strings like 'today', 'yesterday', 'tomorrow', etc.
-
-        Args:
-            date_str: The relative date string to parse
-
-        Returns:
-            A datetime.date object if recognized, None otherwise
-        """
-        today = datetime.date.today()
-        relative_dates = {
-            "today": today,
-            "yesterday": today - datetime.timedelta(days=1),
-            "tomorrow": today + datetime.timedelta(days=1),
-            "last week": today - datetime.timedelta(weeks=1),
-            "next week": today + datetime.timedelta(weeks=1),
-            "last month": today - datetime.timedelta(days=30),
-            "next month": today + datetime.timedelta(days=30),
-            "last year": today - datetime.timedelta(days=365),
-            "next year": today + datetime.timedelta(days=365),
-            "now": today,
-        }
-        return relative_dates.get(date_str)
-
-    @staticmethod
-    def _try_strptime(date_str: str, fmt: str) -> Optional[datetime.datetime]:
-        try:
-            return datetime.datetime.strptime(date_str, fmt)
-        except ValueError:
-            return None
-
-    @staticmethod
-    def _parse_special_formats(date_str: str) -> Optional[datetime.date]:
-        """
-        Parse 'day of month' and ordinal formats (e.g., "25th of December 1990").
-
-        Args:
-            date_str: The date string to parse
-
-        Returns:
-            A datetime.date object if parsing succeeds, None otherwise
-        """
-        if match := DAY_OF_MONTH_REGEX.match(date_str):
-            day, month, year = match.groups()
-            clean_str = f"{day} {month} {year}"
-            for fmt in DateParser.NATURAL_FORMATS:
-                if parsed := DateParser._try_strptime(clean_str, fmt):
-                    return parsed.date()
-
-        if ORDINAL_SUFFIX_REGEX.search(date_str):
-            clean_str = ORDINAL_SUFFIX_REGEX.sub(r"\1", date_str)
-            for fmt in DateParser.NATURAL_FORMATS:
-                if parsed := DateParser._try_strptime(clean_str, fmt):
-                    return parsed.date()
+        if MIN_VALID_YEAR <= date.year <= MAX_VALID_YEAR:
+            return date
 
         return None
 
     @staticmethod
     def _parse_compact_numeric(date_str: str) -> Optional[datetime.date]:
-        """
-        Parse compact numeric date formats like YYYYMMDD, DDMMYY, etc.
+        """Parse compact numeric date formats like YYYYMMDD, DDMMYY, etc."""
+        length = len(date_str)
 
-        Args:
-            date_str: The compact numeric date string
+        if length == 8:
+            # Try YYYYMMDD first (most common)
+            if date := DateParser._try_create_date(
+                date_str[0:4], date_str[4:6], date_str[6:8]
+            ):
+                return date
+            # Try DDMMYYYY
+            if date := DateParser._try_create_date(
+                date_str[4:8], date_str[2:4], date_str[0:2]
+            ):
+                return date
+            # Try MMDDYYYY
+            if date := DateParser._try_create_date(
+                date_str[4:8], date_str[0:2], date_str[2:4]
+            ):
+                return date
 
-        Returns:
-            A datetime.date object if parsing succeeds, None otherwise
-        """
-        parsers = {
-            8: [
-                lambda s: (s[0:4], s[4:6], s[6:8]),
-                lambda s: (s[4:8], s[2:4], s[0:2]),
-                lambda s: (s[4:8], s[0:2], s[2:4]),
-            ],
-            6: [
-                lambda s: (s[4:6], s[0:2], s[2:4]),
-                lambda s: (s[4:6], s[2:4], s[0:2]),
-                lambda s: (s[0:2], s[2:4], s[4:6]),
-            ],
-        }
+        elif length == 6:
+            # Try YYMMDD
+            if date := DateParser._try_create_date_from_2_digit_year(
+                date_str[0:2], date_str[2:4], date_str[4:6]
+            ):
+                return date
+            # Try DDMMYY
+            if date := DateParser._try_create_date_from_2_digit_year(
+                date_str[4:6], date_str[2:4], date_str[0:2]
+            ):
+                return date
+            # Try MMDDYY
+            if date := DateParser._try_create_date_from_2_digit_year(
+                date_str[4:6], date_str[0:2], date_str[2:4]
+            ):
+                return date
 
-        if len(date_str) in parsers:
-            for parser in parsers[len(date_str)]:
-                y, m, d = parser(date_str)
-                if len(y) == 2:
-                    date = DateParser._try_create_date_from_2_digit_year(y, m, d)
-                    if date:
-                        return date
-                else:
-                    date = DateParser._try_create_date(y, m, d)
-                    if date:
-                        return date
-        return None
-
-    @staticmethod
-    def _parse_julian(date_str: str) -> Optional[datetime.date]:
-        """
-        Parse Julian date format YYYY-DDD where DDD is the day of year.
-
-        Args:
-            date_str: The Julian date string to parse
-
-        Returns:
-            A datetime.date object if parsing succeeds, None otherwise
-        """
-        if match := JULIAN_DATE_REGEX.match(date_str):
-            year, day_of_year = map(int, match.groups())
-            max_days = 366 if isleap(year) else 365
-            if not 1 <= day_of_year <= max_days:
-                return None
-            try:
-                return datetime.date(year, 1, 1) + datetime.timedelta(days=day_of_year - 1)
-            except (ValueError, OverflowError):
-                return None
-        return None
-
-    @staticmethod
-    def _parse_unix_timestamp(date_str: str) -> Optional[datetime.date]:
-        """
-        Parse Unix timestamp (seconds since epoch, Jan 1, 1970).
-
-        Args:
-            date_str: The Unix timestamp string to parse
-
-        Returns:
-            A datetime.date object if parsing succeeds, None otherwise
-        """
-        if match := UNIX_TIMESTAMP_REGEX.match(date_str):
-            try:
-                timestamp = int(match.group(1))
-                if 0 <= timestamp <= 4102444800:
-                    dt = datetime.datetime.fromtimestamp(timestamp, datetime.timezone.utc)
-                    return dt.date()
-            except (ValueError, OSError, OverflowError):
-                return None
         return None
 
     @staticmethod
@@ -391,16 +354,10 @@ class DateParser:
         """
         Parse Excel serial date number (days since Jan 1, 1900).
 
-        Args:
-            date_str: The Excel serial number string
-
-        Returns:
-            A datetime.date object if parsing succeeds, None otherwise
-
         Note:
-            Excel incorrectly treats 1900 as a leap year, which is handled in this implementation.
+            Excel incorrectly treats 1900 as a leap year, which is handled here.
         """
-        if not EXCEL_SERIAL_REGEX.match(date_str) or len(date_str) == 6:
+        if not EXCEL_SERIAL_REGEX.match(date_str):
             return None
 
         try:
@@ -409,17 +366,15 @@ class DateParser:
             if len(date_str) == 4 and MIN_VALID_YEAR <= serial <= MAX_VALID_YEAR:
                 return None
 
-            if not (1 <= serial <= 2958465):
+            if not (1 <= serial <= MAX_EXCEL_SERIAL):
                 return None
 
             excel_epoch = datetime.date(1899, 12, 31)
 
             if serial >= 60:
-                result_date = excel_epoch + datetime.timedelta(days=serial - 1)
+                return excel_epoch + datetime.timedelta(days=serial - 1)
             else:
-                result_date = excel_epoch + datetime.timedelta(days=serial)
-
-            return result_date
+                return excel_epoch + datetime.timedelta(days=serial)
         except (ValueError, OverflowError):
             return None
 
@@ -428,63 +383,78 @@ class DateParser:
         """
         Parse fiscal quarter format like '2023-Q4' or '2023 Q4'.
 
-        Args:
-            date_str: The fiscal quarter string to parse
-
-        Returns:
-            The first day of the quarter as a datetime.date object, None if parsing fails
-
-        Note:
-            Assumes calendar year quarters: Q1=Jan 1, Q2=Apr 1, Q3=Jul 1, Q4=Oct 1
+        Returns the first day of the quarter.
         """
         if match := FISCAL_QUARTER_REGEX.match(date_str):
             try:
                 year = int(match.group(1))
                 quarter = int(match.group(2))
-
-                quarter_start_month = {1: 1, 2: 4, 3: 7, 4: 10}
-                month = quarter_start_month[quarter]
-
+                month = (quarter - 1) * 3 + 1
                 return datetime.date(year, month, 1)
-            except (ValueError, KeyError):
-                return None
+            except ValueError:
+                pass
+        return None
+
+    @staticmethod
+    def _parse_julian(date_str: str) -> Optional[datetime.date]:
+        """Parse Julian date format YYYY-DDD where DDD is the day of year."""
+        if match := JULIAN_DATE_REGEX.match(date_str):
+            try:
+                year = int(match.group(1))
+                day_of_year = int(match.group(2))
+                max_days = 366 if isleap(year) else 365
+
+                if 1 <= day_of_year <= max_days:
+                    return datetime.date(year, 1, 1) + datetime.timedelta(
+                        days=day_of_year - 1
+                    )
+            except (ValueError, OverflowError):
+                pass
+        return None
+
+    @staticmethod
+    def _parse_unix_timestamp(date_str: str) -> Optional[datetime.date]:
+        """Parse Unix timestamp (seconds since epoch, Jan 1, 1970)."""
+        if UNIX_TIMESTAMP_REGEX.match(date_str):
+            try:
+                timestamp = int(date_str)
+                if 0 <= timestamp <= MAX_UNIX_TIMESTAMP:
+                    return datetime.datetime.fromtimestamp(
+                        timestamp, datetime.timezone.utc
+                    ).date()
+            except (ValueError, OSError, OverflowError):
+                pass
         return None
 
     @staticmethod
     def _try_create_date(y: str, m: str, d: str) -> Optional[datetime.date]:
-        """
-        Create a date from year, month, and day strings.
-
-        Args:
-            y: Year string
-            m: Month string
-            d: Day string
-
-        Returns:
-            A datetime.date object if valid, None otherwise
-        """
+        """Create a date from year, month, and day strings."""
         try:
-            return datetime.date(int(y), int(m), int(d))
+            year, month, day = int(y), int(m), int(d)
+            if 1 <= month <= 12 and 1 <= day <= 31:
+                return datetime.date(year, month, day)
         except (ValueError, TypeError):
-            return None
+            pass
+        return None
 
     @staticmethod
-    def _try_create_date_from_2_digit_year(y: str, m: str, d: str) -> Optional[datetime.date]:
+    def _try_create_date_from_2_digit_year(
+        y: str, m: str, d: str
+    ) -> Optional[datetime.date]:
         """
         Create a date from 2-digit year, month, and day strings.
 
-        Args:
-            y: 2-digit year string (00-49 = 2000-2049, 50-99 = 1950-1999)
-            m: Month string
-            d: Day string
-
-        Returns:
-            A datetime.date object if valid, None otherwise
+        Uses pivot year: 00-49 = 2000-2049, 50-99 = 1950-1999
         """
         try:
             year_int = int(y)
+            month, day = int(m), int(d)
+
+            if not (1 <= month <= 12 and 1 <= day <= 31):
+                return None
+
             full_year = 2000 + year_int if year_int < 50 else 1900 + year_int
-            return datetime.date(full_year, int(m), int(d))
+            return datetime.date(full_year, month, day)
         except (ValueError, TypeError):
             return None
 
@@ -494,11 +464,23 @@ class AgeCalculator:
     Handles precise age calculation and output formatting.
 
     Provides methods for calculating age with accurate handling of leap years,
-    month-end boundaries, and leap day birthdays. All methods are static.
+    month-end boundaries, and leap day birthdays.
     """
 
-    @staticmethod
-    def calculate_age(birthday: datetime.date, today: Optional[datetime.date] = None) -> AgeResult:
+    _DAYS_OF_WEEK: Tuple[str, ...] = (
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+        "Sunday",
+    )
+
+    @classmethod
+    def calculate_age(
+        cls, birthday: datetime.date, today: Optional[datetime.date] = None
+    ) -> AgeResult:
         """
         Calculate precise age from a birthday to a given date.
 
@@ -512,17 +494,18 @@ class AgeCalculator:
 
         Raises:
             ValueError: If birthday is in the future relative to today
-
-        Note:
-            Handles leap day birthdays (Feb 29) correctly and accounts for varying month lengths.
         """
-        today = today or datetime.date.today()
+        if today is None:
+            today = datetime.date.today()
+
         if birthday > today:
             raise ValueError("Birthday cannot be in the future.")
 
-        years = (
-            today.year - birthday.year - ((today.month, today.day) < (birthday.month, birthday.day))
+        had_birthday_this_year = (today.month, today.day) >= (
+            birthday.month,
+            birthday.day,
         )
+        years = today.year - birthday.year - (0 if had_birthday_this_year else 1)
 
         months = today.month - birthday.month
         if today.day < birthday.day:
@@ -533,69 +516,30 @@ class AgeCalculator:
         if today.day >= birthday.day:
             days = today.day - birthday.day
         else:
-            first_day_of_current_month = today.replace(day=1)
-            last_day_of_prev_month = first_day_of_current_month - datetime.timedelta(days=1)
-            effective_day = min(birthday.day, last_day_of_prev_month.day)
-            anniversary_in_prev_month = last_day_of_prev_month.replace(day=effective_day)
-            days = (today - anniversary_in_prev_month).days
+            first_of_month = today.replace(day=1)
+            last_of_prev_month = first_of_month - datetime.timedelta(days=1)
+            effective_day = min(birthday.day, last_of_prev_month.day)
+            anniversary = last_of_prev_month.replace(day=effective_day)
+            days = (today - anniversary).days
 
         total_days = (today - birthday).days
-
-        try:
-            next_birthday = birthday.replace(year=today.year)
-        except ValueError:
-            next_birthday = birthday.replace(year=today.year, day=28)
-
-        if next_birthday < today:
-            try:
-                next_birthday = birthday.replace(year=today.year + 1)
-            except ValueError:
-                next_birthday = birthday.replace(year=today.year + 1, day=28)
-
-        next_birthday_in_days = (next_birthday - today).days
+        next_birthday_in_days = cls._days_until_next_birthday(birthday, today)
+        birth_day_of_week = cls._DAYS_OF_WEEK[birthday.weekday()]
 
         return AgeResult(
             years=years,
             months=months,
             days=days,
             total_days=total_days,
-            birth_day_of_week=birthday.strftime("%A"),
+            birth_day_of_week=birth_day_of_week,
             next_birthday_in_days=next_birthday_in_days,
         )
 
-    @staticmethod
-    def format_age_output(birthday: datetime.date, age_data: AgeResult) -> str:
-        """
-        Format age calculation results as a human-readable string.
-
-        Args:
-            birthday: The birthdate
-            age_data: The AgeResult object containing age information
-
-        Returns:
-            A formatted string with age details and next birthday information
-        """
-        age_parts = []
-        if age_data.years > 0:
-            plural = "s" if age_data.years != 1 else ""
-            age_parts.append(f"{age_data.years} year{plural}")
-        if age_data.months > 0:
-            plural = "s" if age_data.months != 1 else ""
-            age_parts.append(f"{age_data.months} month{plural}")
-        if age_data.days > 0 or not age_parts:
-            plural = "s" if age_data.days != 1 else ""
-            age_parts.append(f"{age_data.days} day{plural}")
-
-        if len(age_parts) > 1:
-            age_str = ", ".join(age_parts[:-1]) + f" and {age_parts[-1]}"
-        else:
-            age_str = age_parts[0] if age_parts else "0 days"
-
-        if age_data.next_birthday_in_days == 0:
-            birthday_msg = "Happy Birthday!"
-        else:
-            plural = "day" if age_data.next_birthday_in_days == 1 else "days"
-            birthday_msg = f"Your next birthday is in {age_data.next_birthday_in_days} {plural}!"
+    @classmethod
+    def format_age_output(cls, birthday: datetime.date, age_data: AgeResult) -> str:
+        """Format age calculation results as a human-readable string."""
+        age_str = cls._format_age_string(age_data)
+        birthday_msg = cls._format_birthday_message(age_data.next_birthday_in_days)
 
         return (
             f"\nResults:\n--------------------\n"
@@ -605,54 +549,57 @@ class AgeCalculator:
             f"{birthday_msg}\n"
         )
 
+    @staticmethod
+    def _days_until_next_birthday(birthday: datetime.date, today: datetime.date) -> int:
+        """Calculate days until the next birthday."""
+        try:
+            next_birthday = birthday.replace(year=today.year)
+        except ValueError:
+            next_birthday = datetime.date(today.year, 2, 28)
+
+        if next_birthday < today:
+            try:
+                next_birthday = birthday.replace(year=today.year + 1)
+            except ValueError:
+                next_birthday = datetime.date(today.year + 1, 2, 28)
+
+        return (next_birthday - today).days
+
+    @staticmethod
+    def _format_age_string(age_data: AgeResult) -> str:
+        """Format the age components into a human-readable string."""
+        parts: List[str] = []
+
+        if age_data.years > 0:
+            parts.append(f"{age_data.years} year{'s' if age_data.years != 1 else ''}")
+
+        if age_data.months > 0:
+            parts.append(
+                f"{age_data.months} month{'s' if age_data.months != 1 else ''}"
+            )
+
+        if age_data.days > 0 or not parts:
+            parts.append(f"{age_data.days} day{'s' if age_data.days != 1 else ''}")
+
+        if len(parts) > 1:
+            return ", ".join(parts[:-1]) + f" and {parts[-1]}"
+        return parts[0] if parts else "0 days"
+
+    @staticmethod
+    def _format_birthday_message(days_until_birthday: int) -> str:
+        """Format the birthday countdown message."""
+        if days_until_birthday == 0:
+            return "Happy Birthday!"
+        plural = "day" if days_until_birthday == 1 else "days"
+        return f"Your next birthday is in {days_until_birthday} {plural}!"
+
 
 class AgeCalculatorApp:
     """Main application class for handling interactive user input and output."""
 
-    EXIT_COMMANDS = {"quit", "exit", "q"}
+    EXIT_COMMANDS: frozenset = frozenset({"exit", "q", "quit"})
 
-    def __init__(self, date_parser: DateParser, age_calculator: AgeCalculator):
-        self.date_parser = date_parser
-        self.age_calculator = age_calculator
-
-    def run(self) -> None:
-        """
-        Start the main interactive application loop.
-
-        Prompts for user input, parses dates, calculates age, and displays results.
-        Continues until user enters an exit command.
-        """
-        self._display_welcome()
-
-        while True:
-            try:
-                user_input = self._get_user_input()
-                if user_input.lower() in self.EXIT_COMMANDS:
-                    print("Goodbye!")
-                    break
-
-                if not user_input:
-                    print("Warning: Please enter a birthday.")
-                    continue
-
-                birthday = self.date_parser.parse_date(user_input)
-                if not birthday:
-                    message = "Sorry, that date format was not recognized. Please try again."
-                    print(f"Error: {message}")
-                    continue
-
-                age_data = self.age_calculator.calculate_age(birthday)
-                output = self.age_calculator.format_age_output(birthday, age_data)
-                print(output)
-            except ValueError as e:
-                print(f"Error: {str(e)}")
-            except (KeyboardInterrupt, EOFError):
-                print(f"\n\nGoodbye!")
-                break
-
-    def _display_welcome(self) -> None:
-        """Display a welcome message with usage instructions and supported date formats."""
-        welcome_text = """
+    WELCOME_TEXT: str = """
 Age Calculator
 ==============================
 Find out your age down to the day, discover the
@@ -671,16 +618,52 @@ Supports 100+ date formats! Try any of these:
 Type 'quit' or 'exit' to close the program.
 ==============================
 """
-        print(welcome_text)
 
-    def _get_user_input(self) -> str:
-        """
-        Prompt the user for their birthday input.
+    def __init__(
+        self,
+        date_parser: Optional[DateParser] = None,
+        age_calculator: Optional[AgeCalculator] = None,
+    ):
+        self.date_parser = date_parser or DateParser()
+        self.age_calculator = age_calculator or AgeCalculator()
 
-        Returns:
-            The user's input string, stripped of whitespace
+    def run(self) -> None:
         """
-        return input("Enter your birthday: ").strip()
+        Start the main interactive application loop.
+
+        Prompts for user input, parses dates, calculates age, and displays results.
+        Continues until user enters an exit command.
+        """
+        print(self.WELCOME_TEXT)
+
+        while True:
+            try:
+                user_input = input("Enter your birthday: ").strip()
+
+                if user_input.lower() in self.EXIT_COMMANDS:
+                    print("Goodbye!")
+                    break
+
+                if not user_input:
+                    print("Warning: Please enter a birthday.")
+                    continue
+
+                birthday = self.date_parser.parse_date(user_input)
+                if not birthday:
+                    print(
+                        "Error: Sorry, that date format was not recognized. "
+                        "Please try again."
+                    )
+                    continue
+
+                age_data = self.age_calculator.calculate_age(birthday)
+                print(self.age_calculator.format_age_output(birthday, age_data))
+
+            except ValueError as e:
+                print(f"Error: {e}")
+            except (KeyboardInterrupt, EOFError):
+                print("\n\nGoodbye!")
+                break
 
 
 def main() -> None:
@@ -688,8 +671,6 @@ def main() -> None:
     Entry point for the age calculator application.
 
     Supports both direct mode (with command-line argument) and interactive mode.
-    If a birthday argument is provided, calculates and displays age immediately.
-    Otherwise, starts interactive mode for multiple calculations.
     """
     parser = argparse.ArgumentParser(
         description="A robust CLI tool to calculate age from a birthday.",
@@ -710,17 +691,15 @@ def main() -> None:
         try:
             birthday_date = date_parser.parse_date(args.birthday)
             if not birthday_date:
-                error_msg = f"The date format was not recognized: '{args.birthday}'"
-                print(f"Error: {error_msg}")
+                print(f"Error: The date format was not recognized: '{args.birthday}'")
                 return
 
             age_data = age_calculator.calculate_age(birthday_date)
-            output = age_calculator.format_age_output(birthday_date, age_data)
-            print(output)
+            print(age_calculator.format_age_output(birthday_date, age_data))
         except ValueError as e:
-            print(f"Error: {str(e)}")
+            print(f"Error: {e}")
         except (KeyboardInterrupt, EOFError):
-            print(f"\n\nGoodbye!")
+            print("\n\nGoodbye!")
     else:
         app = AgeCalculatorApp(date_parser, age_calculator)
         app.run()
