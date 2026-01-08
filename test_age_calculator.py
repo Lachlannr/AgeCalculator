@@ -2,11 +2,14 @@
 End-to-end regression tests for the Age Calculator CLI.
 
 The suite intentionally exercises:
-- DateParser happy-path formats (ISO/US/EU, natural language, ordinal variations)
-- Relative expressions, Julian/ISO week formats, fiscal quarters, and month/year fallbacks
+- DateParser happy-path formats (ISO/US/EU, natural language,
+  ordinal variations)
+- Relative expressions, Julian/ISO week formats, fiscal quarters, and
+  month/year fallbacks
 - Numeric parsing pathways (compact integers, Excel serials, Unix timestamps)
 - Validation, bounds checking, and error handling safeguards
-- AgeCalculator math across calendar boundaries, leap years, and future-date rejection
+- AgeCalculator math across calendar boundaries, leap years, and
+  future-date rejection
 - Human-readable formatting, including pluralization edge cases
 - Integration flows covering CLI argument mode and interactive prompts
 """
@@ -129,7 +132,11 @@ class DateParserRelativeAndSpecialTests(unittest.TestCase):
 class DateParserNumericParsingTests(unittest.TestCase):
     """Tests for numeric date format parsing."""
 
-    def test_eight_digit_numeric_formats(self):
+    def test_compact_six_digit_formats(self):
+        self.assertEqual(DateParser.parse_date("102598"), datetime.date(1998, 10, 25))
+        self.assertEqual(DateParser.parse_date("251098"), datetime.date(1998, 10, 25))
+
+    def test_compact_eight_digit_formats(self):
         self.assertEqual(DateParser.parse_date("12051999"), datetime.date(1999, 5, 12))
         self.assertEqual(DateParser.parse_date("19991205"), datetime.date(1999, 12, 5))
 
@@ -143,23 +150,22 @@ class DateParserNumericParsingTests(unittest.TestCase):
             with self.subTest(raw=raw):
                 self.assertIsNone(DateParser.parse_date(raw))
 
-    def test_six_digit_numeric_formats(self):
-        self.assertEqual(DateParser.parse_date("102598"), datetime.date(1998, 10, 25))
-        self.assertEqual(DateParser.parse_date("251098"), datetime.date(1998, 10, 25))
-
     def test_unix_timestamps(self):
         self.assertEqual(DateParser.parse_date("0"), datetime.date(1970, 1, 1))
         self.assertEqual(DateParser.parse_date("1609459200"), datetime.date(2021, 1, 1))
 
     def test_unix_timestamps_timezone_independence(self):
         """Verify Unix timestamp parsing uses UTC regardless of system timezone."""
-        self.assertEqual(DateParser.parse_date("0"), datetime.date(1970, 1, 1))
-        self.assertEqual(DateParser.parse_date("946684800"), datetime.date(2000, 1, 1))
-        self.assertEqual(
-            DateParser.parse_date("1609459199"), datetime.date(2020, 12, 31)
-        )
-        self.assertEqual(DateParser.parse_date("1609459200"), datetime.date(2021, 1, 1))
-        self.assertEqual(DateParser.parse_date("1609502400"), datetime.date(2021, 1, 1))
+        test_cases = [
+            ("0", datetime.date(1970, 1, 1)),
+            ("946684800", datetime.date(2000, 1, 1)),
+            ("1609459199", datetime.date(2020, 12, 31)),
+            ("1609459200", datetime.date(2021, 1, 1)),
+            ("1609502400", datetime.date(2021, 1, 1)),
+        ]
+        for timestamp, expected in test_cases:
+            with self.subTest(timestamp=timestamp):
+                self.assertEqual(DateParser.parse_date(timestamp), expected)
 
     def test_year_first_six_digit_format(self):
         self.assertEqual(DateParser.parse_date("900101"), datetime.date(1990, 1, 1))
@@ -189,9 +195,7 @@ class DateParserValidationTests(unittest.TestCase):
 class AgeCalculatorComputationTests(unittest.TestCase):
     """Tests for age calculation logic."""
 
-    @classmethod
-    def setUpClass(cls):
-        cls.reference_date = datetime.date(2025, 9, 9)
+    reference_date = datetime.date(2025, 9, 9)
 
     def test_age_when_birthday_passed(self):
         birthday = datetime.date(1990, 8, 20)
@@ -279,12 +283,10 @@ class CliTests(unittest.TestCase):
         fake_birthday = datetime.date(2000, 1, 1)
         fake_age = AgeResult(24, 0, 0, 8760, "Saturday", 0)
 
-        with mock.patch.object(
-            DateParser, "parse_date", return_value=fake_birthday
-        ), mock.patch.object(
-            AgeCalculator, "calculate_age", return_value=fake_age
-        ), mock.patch(
-            "builtins.input", side_effect=["2000-01-01", "exit"]
+        with (
+            mock.patch.object(DateParser, "parse_date", return_value=fake_birthday),
+            mock.patch.object(AgeCalculator, "calculate_age", return_value=fake_age),
+            mock.patch("builtins.input", side_effect=["2000-01-01", "exit"]),
         ):
             buffer = io.StringIO()
             with redirect_stdout(buffer):
